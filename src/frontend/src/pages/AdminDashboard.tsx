@@ -38,50 +38,126 @@ export function AdminDashboard() {
 function EventList() {
   const [events, setEvents] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", date: "", location: "", rewardThreshold: 3 });
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", description: "", date: "", startTime: "", endTime: "", location: "", rewardThreshold: 3, timezone: "Asia/Kolkata" });
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
 
   useEffect(() => { loadEvents(); }, []);
 
   async function loadEvents() {
+    setListLoading(true);
     try {
       const data = await api("/admin/events");
       setEvents(data.events || []);
-    } catch { /* ignore */ }
+    } catch (err: any) {
+      console.error("loadEvents failed:", err);
+    }
+    setListLoading(false);
   }
 
-  async function createEvent(e: React.FormEvent) {
+  function getTimezoneOffsetString() {
+    const offset = new Date().getTimezoneOffset();
+    const sign = offset <= 0 ? "+" : "-";
+    const hrs = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+    const mins = String(Math.abs(offset) % 60).padStart(2, "0");
+    return `${sign}${hrs}:${mins}`;
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    const offset = getTimezoneOffsetString();
+    const payload = { ...form, startTime: form.startTime + offset, endTime: form.endTime + offset };
     try {
-      await api("/admin/events", { method: "POST", body: JSON.stringify(form) });
+      if (editingEventId) {
+        await api(`/admin/events/${editingEventId}`, { method: "PUT", body: JSON.stringify(payload) });
+        setEditingEventId(null);
+      } else {
+        await api("/admin/events", { method: "POST", body: JSON.stringify(payload) });
+      }
       setShowForm(false);
-      setForm({ name: "", date: "", location: "", rewardThreshold: 3 });
+      resetForm();
       loadEvents();
     } catch { /* ignore */ }
     setLoading(false);
+  }
+
+  function resetForm() {
+    setForm({ name: "", description: "", date: "", startTime: "", endTime: "", location: "", rewardThreshold: 3, timezone: "Asia/Kolkata" });
+  }
+
+  function editEvent(ev: any) {
+    const toLocal = (ts: number) => {
+      if (!ts) return "";
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    };
+    setForm({
+      name: ev.name || "",
+      description: ev.description || "",
+      date: ev.date || "",
+      startTime: ev.startTime ? toLocal(ev.startTime) : "",
+      endTime: ev.endTime ? toLocal(ev.endTime) : "",
+      location: ev.location || "",
+      rewardThreshold: ev.rewardThreshold || 3,
+      timezone: ev.timezone || "Asia/Kolkata",
+    });
+    setEditingEventId(ev.eventId);
+    setShowForm(true);
+  }
+
+  async function deleteEvent(eventId: string) {
+    if (!confirm("Delete this event? This cannot be undone.")) return;
+    try {
+      await api(`/admin/events/${eventId}`, { method: "DELETE" });
+      loadEvents();
+    } catch {}
   }
 
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Events</h2>
-        <button onClick={() => setShowForm(!showForm)} style={{ width: "auto", padding: "8px 16px" }}>
+        <button onClick={() => { setShowForm(!showForm); setEditingEventId(null); resetForm(); }} style={{ width: "auto", padding: "8px 16px" }}>
           {showForm ? "Cancel" : "+ Create Event"}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={createEvent} style={{ marginBottom: 24, padding: 16, background: "#f8fafc", borderRadius: 8 }}>
+        <form onSubmit={handleSubmit} style={{ marginBottom: 24, padding: 16, background: "#f8fafc", borderRadius: 8 }}>
           <input placeholder="Event Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
-          <input type="date" placeholder="Date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
+          <textarea placeholder="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} style={{ width: "100%", padding: "12px 16px", border: "2px solid #e0e0e0", borderRadius: 8, fontSize: "1rem", marginBottom: 16, fontFamily: "inherit" }} />
           <input placeholder="Location" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
+          <label style={{ fontSize: "0.85rem", color: "#666" }}>Event Date</label>
+          <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: "0.85rem", color: "#666" }}>Start Time</label>
+              <input type="datetime-local" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} required />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: "0.85rem", color: "#666" }}>End Time</label>
+              <input type="datetime-local" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} required />
+            </div>
+          </div>
+          <select value={form.timezone} onChange={e => setForm({ ...form, timezone: e.target.value })} style={{ width: "100%", padding: "14px 16px", border: "2px solid #e0e0e0", borderRadius: 8, fontSize: "1.1rem", marginBottom: 16 }}>
+            <option value="Asia/Kolkata">Asia/Kolkata (IST, UTC+5:30)</option>
+            <option value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</option>
+            <option value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</option>
+            <option value="Europe/London">Europe/London (GMT/BST)</option>
+            <option value="America/New_York">America/New_York (EST/EDT)</option>
+            <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+            <option value="UTC">UTC</option>
+          </select>
           <input type="number" placeholder="Reward Threshold (sessions)" value={form.rewardThreshold} onChange={e => setForm({ ...form, rewardThreshold: +e.target.value })} min={0} />
-          <button type="submit" disabled={loading}>{loading ? "Creating..." : "Create Event"}</button>
+          <button type="submit" disabled={loading}>{loading ? "Saving..." : editingEventId ? "Update Event" : "Create Event"}</button>
         </form>
       )}
 
-      {events.length === 0 && !showForm ? (
+      {listLoading ? (
+        <p>Loading events...</p>
+      ) : events.length === 0 && !showForm ? (
         <p>No events yet. Create your first event.</p>
       ) : (
         <table>
@@ -95,7 +171,11 @@ function EventList() {
                 <td>{ev.date}</td>
                 <td>{ev.location}</td>
                 <td><span className={`badge badge-${ev.status === "active" ? "success" : "pending"}`}>{ev.status}</span></td>
-                <td><Link to={`/admin/events/${ev.eventId}`}>Manage</Link></td>
+                <td style={{ display: "flex", gap: 4 }}>
+                  <Link to={`/admin/events/${ev.eventId}`}><button style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem" }}>Manage</button></Link>
+                  <button onClick={() => editEvent(ev)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem", background: "#2563eb" }}>Edit</button>
+                  <button onClick={() => deleteEvent(ev.eventId)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem", background: "#dc2626" }}>Delete</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -117,6 +197,7 @@ function EventDetail() {
   const [attJson, setAttJson] = useState("");
   const [showSessForm, setShowSessForm] = useState(false);
   const [sessForm, setSessForm] = useState({ name: "", date: "", startTime: "", endTime: "" });
+  const [editingSessId, setEditingSessId] = useState<string | null>(null);
   const [qrData, setQrData] = useState<{ qrCode: string; url: string } | null>(null);
 
   useEffect(() => {
@@ -151,9 +232,53 @@ function EventDetail() {
   async function createSession(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api(`/admin/events/${eventId}/sessions`, { method: "POST", body: JSON.stringify(sessForm) });
+      // Append local timezone offset so Lambda parses correctly
+      const offset = getTimezoneOffsetString();
+      const payload = {
+        ...sessForm,
+        startTime: sessForm.startTime + offset,
+        endTime: sessForm.endTime + offset,
+      };
+      if (editingSessId) {
+        await api(`/admin/events/${eventId}/sessions/${editingSessId}`, { method: "PUT", body: JSON.stringify(payload) });
+        setEditingSessId(null);
+      } else {
+        await api(`/admin/events/${eventId}/sessions`, { method: "POST", body: JSON.stringify(payload) });
+      }
       setShowSessForm(false);
       setSessForm({ name: "", date: "", startTime: "", endTime: "" });
+      loadSessions();
+    } catch {}
+  }
+
+  function getTimezoneOffsetString() {
+    const offset = new Date().getTimezoneOffset();
+    const sign = offset <= 0 ? "+" : "-";
+    const hrs = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+    const mins = String(Math.abs(offset) % 60).padStart(2, "0");
+    return `${sign}${hrs}:${mins}`;
+  }
+
+  function editSession(s: any) {
+    // Convert timestamp to local datetime-local format (YYYY-MM-DDTHH:MM)
+    const toLocal = (ts: number) => {
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    };
+    setSessForm({
+      name: s.name,
+      date: s.date,
+      startTime: toLocal(s.startTime),
+      endTime: toLocal(s.endTime),
+    });
+    setEditingSessId(s.sessionId);
+    setShowSessForm(true);
+  }
+
+  async function deleteSession(sessionId: string) {
+    if (!confirm("Delete this session? This cannot be undone.")) return;
+    try {
+      await api(`/admin/events/${eventId}/sessions/${sessionId}`, { method: "DELETE" });
       loadSessions();
     } catch {}
   }
@@ -185,7 +310,7 @@ function EventDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <h2 style={{ margin: 0 }}>{event.name}</h2>
-            <p style={{ color: "#666", margin: "4px 0" }}>{event.date} • {event.location}</p>
+            <p style={{ color: "#666", margin: "4px 0" }}>{event.date} • {event.location}{event.timezone ? ` • ${event.timezone}` : ""}</p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <span className={`badge badge-${event.status === "active" ? "success" : "pending"}`}>{event.status}</span>
@@ -243,7 +368,7 @@ function EventDetail() {
 
       {tab === "sessions" && (
         <div className="card">
-          <button onClick={() => setShowSessForm(!showSessForm)} style={{ width: "auto", marginBottom: 16 }}>{showSessForm ? "Cancel" : "+ Add Session"}</button>
+          <button onClick={() => { setShowSessForm(!showSessForm); setEditingSessId(null); setSessForm({ name: "", date: "", startTime: "", endTime: "" }); }} style={{ width: "auto", marginBottom: 16 }}>{showSessForm ? "Cancel" : "+ Add Session"}</button>
           {showSessForm && (
             <form onSubmit={createSession} style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 8 }}>
               <input placeholder="Session Name" value={sessForm.name} onChange={e => setSessForm({ ...sessForm, name: e.target.value })} required />
@@ -252,19 +377,23 @@ function EventDetail() {
                 <input type="datetime-local" placeholder="Start Time" value={sessForm.startTime} onChange={e => setSessForm({ ...sessForm, startTime: e.target.value })} required />
                 <input type="datetime-local" placeholder="End Time" value={sessForm.endTime} onChange={e => setSessForm({ ...sessForm, endTime: e.target.value })} required />
               </div>
-              <button type="submit" style={{ marginTop: 8 }}>Create Session</button>
+              <button type="submit" style={{ marginTop: 8 }}>{editingSessId ? "Update Session" : "Create Session"}</button>
             </form>
           )}
           <table>
-            <thead><tr><th>Name</th><th>Date</th><th>Start</th><th>End</th><th>QR</th></tr></thead>
+            <thead><tr><th>Name</th><th>Date</th><th>Start</th><th>End</th><th>Actions</th></tr></thead>
             <tbody>
               {sessions.map(s => (
                 <tr key={s.sessionId}>
                   <td>{s.name}</td>
                   <td>{s.date}</td>
-                  <td>{new Date(s.startTime).toLocaleTimeString()}</td>
-                  <td>{new Date(s.endTime).toLocaleTimeString()}</td>
-                  <td><button onClick={() => generateQr(s.sessionId)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem" }}>QR</button></td>
+                  <td>{new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: event?.timezone || undefined })}</td>
+                  <td>{new Date(s.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: event?.timezone || undefined })}</td>
+                  <td style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => generateQr(s.sessionId)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem", background: "#7c3aed" }}>QR</button>
+                    <button onClick={() => editSession(s)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem", background: "#2563eb" }}>Edit</button>
+                    <button onClick={() => deleteSession(s.sessionId)} style={{ width: "auto", padding: "4px 8px", fontSize: "0.8rem", background: "#dc2626" }}>Delete</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

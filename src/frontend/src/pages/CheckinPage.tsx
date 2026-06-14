@@ -42,6 +42,11 @@ export function CheckinPage() {
       });
       setAttendee(res.attendee);
       setStep("verified");
+      // Cache attendee info in localStorage for session auto-submit
+      localStorage.setItem("att_eventId", eventId);
+      localStorage.setItem("att_seq", res.attendee.sequenceNumber);
+      localStorage.setItem("att_name", res.attendee.name);
+      localStorage.setItem("att_company", res.attendee.company);
     } catch (err: any) {
       setError(err.message);
     } finally {

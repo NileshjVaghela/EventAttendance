@@ -111,13 +111,17 @@ function assertRole(current: string, required: string) {
 
 async function createEvent(body: any) {
   const eventId = uuid();
-  const item = {
+  const item: any = {
     PK: `EVENT#${eventId}`,
     SK: "#METADATA",
     eventId,
     name: body.name,
+    description: body.description || "",
     date: body.date,
+    startTime: new Date(body.startTime).getTime(),
+    endTime: new Date(body.endTime).getTime(),
     location: body.location || "",
+    timezone: body.timezone || "Asia/Kolkata",
     status: "draft",
     rewardThreshold: body.rewardThreshold || 0,
     createdAt: Date.now(),
@@ -151,8 +155,12 @@ async function updateEvent(eventId: string, body: any) {
   const values: any = {};
   const names: any = {};
   if (body.name) { expressions.push("#n = :name"); values[":name"] = body.name; names["#n"] = "name"; }
+  if (body.description !== undefined) { expressions.push("description = :desc"); values[":desc"] = body.description; }
   if (body.date) { expressions.push("#d = :date"); values[":date"] = body.date; names["#d"] = "date"; }
-  if (body.location) { expressions.push("location = :loc"); values[":loc"] = body.location; }
+  if (body.startTime) { expressions.push("startTime = :st"); values[":st"] = new Date(body.startTime).getTime(); }
+  if (body.endTime) { expressions.push("endTime = :et"); values[":et"] = new Date(body.endTime).getTime(); }
+  if (body.location) { expressions.push("#loc = :loc"); values[":loc"] = body.location; names["#loc"] = "location"; }
+  if (body.timezone) { expressions.push("timezone = :tz"); values[":tz"] = body.timezone; }
   if (body.status) { expressions.push("#s = :status"); values[":status"] = body.status; names["#s"] = "status"; }
   if (body.rewardThreshold !== undefined) { expressions.push("rewardThreshold = :rt"); values[":rt"] = body.rewardThreshold; }
 
@@ -237,6 +245,16 @@ async function searchAttendees(eventId: string, query: any) {
 // --- Sessions ---
 
 async function createSession(eventId: string, body: any) {
+  // Validate session is within event time window
+  const eventData = await ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { PK: `EVENT#${eventId}`, SK: "#METADATA" } }));
+  if (eventData.Item?.startTime && eventData.Item?.endTime) {
+    const sessStart = new Date(body.startTime).getTime();
+    const sessEnd = new Date(body.endTime).getTime();
+    if (sessStart < eventData.Item.startTime || sessEnd > eventData.Item.endTime) {
+      return response(400, { message: "Session must be within event start/end time" });
+    }
+  }
+
   const sessionId = uuid();
   const item = {
     PK: `EVENT#${eventId}`,
@@ -265,9 +283,22 @@ async function listSessions(eventId: string) {
 }
 
 async function updateSession(eventId: string, sessionId: string, body: any) {
+  // Validate session is within event time window
+  if (body.startTime || body.endTime) {
+    const eventData = await ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { PK: `EVENT#${eventId}`, SK: "#METADATA" } }));
+    if (eventData.Item?.startTime && eventData.Item?.endTime) {
+      const sessStart = body.startTime ? new Date(body.startTime).getTime() : 0;
+      const sessEnd = body.endTime ? new Date(body.endTime).getTime() : Infinity;
+      if (sessStart < eventData.Item.startTime || sessEnd > eventData.Item.endTime) {
+        return response(400, { message: "Session must be within event start/end time" });
+      }
+    }
+  }
+
   const expressions: string[] = [];
   const values: any = {};
-  if (body.name) { expressions.push("#n = :name"); values[":name"] = body.name; }
+  const names: any = {};
+  if (body.name) { expressions.push("#n = :name"); values[":name"] = body.name; names["#n"] = "name"; }
   if (body.startTime) { expressions.push("startTime = :st"); values[":st"] = new Date(body.startTime).getTime(); }
   if (body.endTime) { expressions.push("endTime = :et"); values[":et"] = new Date(body.endTime).getTime(); }
 
@@ -279,7 +310,7 @@ async function updateSession(eventId: string, sessionId: string, body: any) {
       Key: { PK: `EVENT#${eventId}`, SK: `SESSION#${sessionId}` },
       UpdateExpression: `SET ${expressions.join(", ")}`,
       ExpressionAttributeValues: values,
-      ExpressionAttributeNames: { "#n": "name" },
+      ...(Object.keys(names).length > 0 && { ExpressionAttributeNames: names }),
     })
   );
   return response(200, { message: "Updated" });
