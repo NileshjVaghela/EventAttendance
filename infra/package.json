@@ -1,0 +1,19 @@
+{
+  "name": "event-attendance-infra",
+  "version": "1.0.0",
+  "bin": { "infra": "bin/app.js" },
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.150.0",
+    "constructs": "10.3.0"
+  },
+  "devDependencies": {
+    "typescript": "5.5.3",
+    "@types/node": "20.14.10"
+  }
+}

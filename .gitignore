@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+*.js.map
+cdk.out/
+package-lock.json
