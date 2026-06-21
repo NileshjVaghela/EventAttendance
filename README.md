@@ -2,6 +2,42 @@
 
 A lightweight, serverless event attendance system built on AWS. Attendees scan venue-displayed QR codes and self-identify using a sequence number + email OTP verification. Also tracks breakout session attendance for reward eligibility.
 
+## What is Event Attendance System?
+
+Event Attendance System is a self-service check-in and session tracking platform designed for conferences, tech events, and workshops. Instead of staff manually scanning badges, attendees scan a QR code displayed at the venue and verify themselves using their registered email — no app install required.
+
+### How It Works
+
+**For Attendees:**
+1. Walk up to the registration desk and scan the QR code with your phone camera
+2. Enter your sequence number (provided during registration)
+3. Receive a one-time code on your registered email
+4. Show the verification screen to desk staff — done!
+
+For breakout sessions, simply scan the session QR displayed on stage and enter your sequence number. No OTP needed — it's instant.
+
+**For Event Organizers:**
+- Upload attendee lists via CSV
+- Generate QR codes for check-in desks and breakout sessions
+- Track real-time attendance and session participation
+- Set reward thresholds (e.g., "attend 8 of 10 sessions to win swag")
+- Export reports for post-event analysis
+
+**For Desk Staff:**
+- View check-in status in real-time
+- Search attendees by name, sequence number, or company
+- Monitor session attendance counts
+
+### Key Benefits
+
+- **Zero friction** — works in any mobile browser, no app download
+- **Scalable** — handles 1200+ concurrent attendees without degradation
+- **Secure** — email OTP verification, server-side captcha, optional MFA for admins
+- **Real-time** — instant check-in status updates for staff
+- **Cost-effective** — fully serverless, ~$10 per event on AWS
+
+---
+
 ## Architecture
 
 - **Frontend:** React 18 + Vite → S3 + CloudFront
