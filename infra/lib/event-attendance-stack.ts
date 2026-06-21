@@ -231,6 +231,10 @@ export class EventAttendanceStack extends cdk.Stack {
     staff.addResource("unassign").addMethod("POST", adminIntegration, authOpts);
     staff.addResource("assignments").addMethod("GET", adminIntegration, authOpts);
 
+    // User management endpoints — reuse staff resource with action-based routing
+    // POST /admin/staff/users (action in body: create/delete/list)
+    staff.addResource("users").addMethod("POST", adminIntegration, authOpts);
+
     // Outputs
     new cdk.CfnOutput(this, "ApiUrl", { value: api.url });
     new cdk.CfnOutput(this, "FrontendUrl", { value: `https://${distribution.distributionDomainName}` });

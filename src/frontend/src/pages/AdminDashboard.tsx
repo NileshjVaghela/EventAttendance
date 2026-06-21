@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../utils/api";
+import { UsersPage } from "./UsersPage";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
@@ -21,12 +22,14 @@ export function AdminDashboard() {
     <div className="admin-container">
       <nav className="admin-nav">
         <Link to="/admin/dashboard">Dashboard</Link>
+        <Link to="/admin/users">Users</Link>
         <button onClick={logout} style={{ marginLeft: "auto", background: "transparent", border: "1px solid #fff", color: "#fff", padding: "8px 16px", borderRadius: "4px", cursor: "pointer", width: "auto" }}>
           Logout
         </button>
       </nav>
       <Routes>
         <Route path="dashboard" element={<EventList />} />
+        <Route path="users" element={<UsersPage />} />
         <Route path="events/:eventId" element={<EventDetail />} />
         <Route path="events/:eventId/reports" element={<ReportsPage />} />
         <Route path="*" element={<EventList />} />

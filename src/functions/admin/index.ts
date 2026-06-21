@@ -116,6 +116,16 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await listStaffAssignments(queryParams);
     }
 
+    // User management (admin only) — single POST endpoint with action field
+    if (resource === "/admin/staff/users" && method === "POST") {
+      assertRole(userRole, "admin");
+      const action = body.action;
+      if (action === "create") return await createUser(body);
+      if (action === "list") return await listUsers();
+      if (action === "delete") return await deleteUser(body.email);
+      return response(400, { message: "action must be create, list, or delete" });
+    }
+
     return response(404, { message: "Not found" });
   } catch (err: any) {
     if (err.message === "FORBIDDEN") {
@@ -199,6 +209,68 @@ async function listStaffAssignments(query: any) {
     return response(200, { eventId, staff: (result.Items || []).map((i: any) => i.email) });
   }
   return response(400, { message: "email or eventId query parameter required" });
+}
+
+// --- User Management ---
+
+const USER_POOL_ID = process.env.USER_POOL_ID!;
+
+async function createUser(body: { email: string; role: string; tempPassword?: string }) {
+  const { email, role } = body;
+  if (!email || !role) return response(400, { message: "email and role required" });
+  if (!["admin", "deskstaff"].includes(role)) return response(400, { message: "role must be admin or deskstaff" });
+
+  const { CognitoIdentityProviderClient, AdminCreateUserCommand, AdminUpdateUserAttributesCommand } = await import("@aws-sdk/client-cognito-identity-provider");
+  const cognito = new CognitoIdentityProviderClient({});
+
+  const tempPassword = body.tempPassword || `Temp${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await cognito.send(new AdminCreateUserCommand({
+    UserPoolId: USER_POOL_ID,
+    Username: email,
+    UserAttributes: [
+      { Name: "email", Value: email },
+      { Name: "email_verified", Value: "true" },
+      { Name: "custom:role", Value: role },
+    ],
+    TemporaryPassword: tempPassword,
+    MessageAction: "SUPPRESS",
+  }));
+
+  return response(201, { email, role, tempPassword, message: "User created. Share temp password with user." });
+}
+
+async function listUsers() {
+  const { CognitoIdentityProviderClient, ListUsersCommand } = await import("@aws-sdk/client-cognito-identity-provider");
+  const cognito = new CognitoIdentityProviderClient({});
+
+  const result = await cognito.send(new ListUsersCommand({ UserPoolId: USER_POOL_ID }));
+  const users = (result.Users || []).map((u) => {
+    const attrs = Object.fromEntries((u.Attributes || []).map((a) => [a.Name, a.Value]));
+    return {
+      email: attrs.email,
+      role: attrs["custom:role"] || "admin",
+      status: u.UserStatus,
+      enabled: u.Enabled,
+      createdAt: u.UserCreateDate?.toISOString(),
+    };
+  });
+  return response(200, { users });
+}
+
+async function deleteUser(email: string) {
+  const { CognitoIdentityProviderClient, AdminDeleteUserCommand } = await import("@aws-sdk/client-cognito-identity-provider");
+  const cognito = new CognitoIdentityProviderClient({});
+
+  await cognito.send(new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: email }));
+
+  // Also clean up any event assignments
+  const assignedIds = await getAssignedEventIds(email);
+  for (const eventId of assignedIds) {
+    await ddb.send(new DeleteCommand({ TableName: TABLE_NAME, Key: { PK: `STAFF#${email}`, SK: `EVENT#${eventId}` } }));
+  }
+
+  return response(200, { message: `User ${email} deleted` });
 }
 
 // --- Events ---
