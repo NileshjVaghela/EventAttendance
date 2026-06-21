@@ -583,15 +583,48 @@ async function deleteSession(eventId: string, sessionId: string) {
 async function generateEventQr(eventId: string) {
   const baseUrl = process.env.FRONTEND_URL || "https://your-domain.com";
   const url = `${baseUrl}/checkin?event=${eventId}`;
-  const qrDataUrl = await QRCode.toDataURL(url, { width: 400, margin: 2 });
-  return response(200, { qrCode: qrDataUrl, url });
+  const shortCode = await getOrCreateShortCode(url);
+  const shortUrl = `${baseUrl}/s/${shortCode}`;
+  const qrDataUrl = await QRCode.toDataURL(shortUrl, { width: 400, margin: 2 });
+  return response(200, { qrCode: qrDataUrl, url, shortUrl, shortCode });
 }
 
 async function generateSessionQr(eventId: string, sessionId: string) {
   const baseUrl = process.env.FRONTEND_URL || "https://your-domain.com";
   const url = `${baseUrl}/session?event=${eventId}&session=${sessionId}`;
-  const qrDataUrl = await QRCode.toDataURL(url, { width: 400, margin: 2 });
-  return response(200, { qrCode: qrDataUrl, url });
+  const shortCode = await getOrCreateShortCode(url);
+  const shortUrl = `${baseUrl}/s/${shortCode}`;
+  const qrDataUrl = await QRCode.toDataURL(shortUrl, { width: 400, margin: 2 });
+  return response(200, { qrCode: qrDataUrl, url, shortUrl, shortCode });
+}
+
+async function getOrCreateShortCode(targetUrl: string): Promise<string> {
+  // Check if a short code already exists for this URL
+  const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+  const existing = await ddb.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: "begins_with(PK, :prefix) AND targetUrl = :url",
+      ExpressionAttributeValues: { ":prefix": "SHORT#", ":url": targetUrl },
+      Limit: 1,
+    })
+  );
+  if (existing.Items && existing.Items.length > 0) {
+    return existing.Items[0].shortCode;
+  }
+
+  // Generate new 9-char alphanumeric code
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let code = "";
+  for (let i = 0; i < 9; i++) code += chars[Math.floor(Math.random() * chars.length)];
+
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: { PK: `SHORT#${code}`, SK: "#REDIRECT", shortCode: code, targetUrl, createdAt: Date.now() },
+    })
+  );
+  return code;
 }
 
 // --- Reports ---

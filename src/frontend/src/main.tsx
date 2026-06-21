@@ -5,6 +5,7 @@ import { CheckinPage } from "./pages/CheckinPage";
 import { SessionPage } from "./pages/SessionPage";
 import { AdminLogin } from "./pages/AdminLogin";
 import { AdminDashboard } from "./pages/AdminDashboard";
+import { ShortRedirect } from "./pages/ShortRedirect";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -14,6 +15,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         {/* Public attendee routes */}
         <Route path="/checkin" element={<CheckinPage />} />
         <Route path="/session" element={<SessionPage />} />
+        <Route path="/s/:code" element={<ShortRedirect />} />
         {/* Admin routes */}
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin/*" element={<AdminDashboard />} />

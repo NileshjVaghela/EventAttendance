@@ -13,6 +13,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await generateCaptcha();
     } else if (path === "/captcha/verify" && event.httpMethod === "POST") {
       return await verifyCaptcha(body);
+    } else if (path === "/s/{code}" && event.httpMethod === "GET") {
+      return await resolveShortUrl(event.pathParameters?.code || "");
     } else if (path === "/checkin/verify-sequence") {
       return await verifySequence(body);
     } else if (path === "/checkin/verify-otp") {
@@ -222,4 +224,13 @@ function maskEmail(email: string): string {
   const [user, domain] = email.split("@");
   const masked = user.slice(0, 2) + "***";
   return `${masked}@${domain}`;
+}
+
+async function resolveShortUrl(code: string) {
+  if (!code) return response(400, { message: "Code required" });
+  const result = await ddb.send(
+    new GetCommand({ TableName: TABLE_NAME, Key: { PK: `SHORT#${code}`, SK: "#REDIRECT" } })
+  );
+  if (!result.Item) return response(404, { message: "Link not found" });
+  return response(200, { targetUrl: result.Item.targetUrl });
 }

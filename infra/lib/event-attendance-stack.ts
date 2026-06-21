@@ -182,6 +182,9 @@ export class EventAttendanceStack extends cdk.Stack {
     captcha.addMethod("GET", new apigateway.LambdaIntegration(checkinFn));
     captcha.addResource("verify").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));
 
+    const shortUrl = api.root.addResource("s");
+    shortUrl.addResource("{code}").addMethod("GET", new apigateway.LambdaIntegration(checkinFn));
+
     const checkin = api.root.addResource("checkin");
     checkin.addResource("verify-sequence").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));
     checkin.addResource("verify-otp").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));

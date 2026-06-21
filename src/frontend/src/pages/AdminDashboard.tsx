@@ -201,7 +201,8 @@ function EventDetail() {
   const [showSessForm, setShowSessForm] = useState(false);
   const [sessForm, setSessForm] = useState({ name: "", date: "", startTime: "", endTime: "" });
   const [editingSessId, setEditingSessId] = useState<string | null>(null);
-  const [qrData, setQrData] = useState<{ qrCode: string; url: string } | null>(null);
+  const [qrData, setQrData] = useState<{ qrCode: string; url: string; shortUrl?: string; shortCode?: string } | null>(null);
+  const [qrFullscreen, setQrFullscreen] = useState(false);
 
   useEffect(() => {
     loadEvent();
@@ -327,9 +328,33 @@ function EventDetail() {
 
       {qrData && (
         <div className="card" style={{ marginBottom: 16, textAlign: "center" }}>
-          <img src={qrData.qrCode} alt="QR Code" style={{ maxWidth: 300 }} />
+          <img
+            src={qrData.qrCode}
+            alt="QR Code"
+            style={{ maxWidth: 300, cursor: "pointer" }}
+            onClick={() => setQrFullscreen(true)}
+            title="Click for fullscreen"
+          />
+          {qrData.shortUrl && (
+            <p style={{ fontSize: "1rem", fontWeight: "bold", margin: "8px 0" }}>
+              Short URL: <a href={qrData.shortUrl} target="_blank" rel="noopener">{qrData.shortCode}</a>
+            </p>
+          )}
           <p style={{ fontSize: "0.85rem", color: "#666", wordBreak: "break-all" }}>{qrData.url}</p>
           <button onClick={() => setQrData(null)} style={{ width: "auto", padding: "6px 12px", background: "#64748b" }}>Close</button>
+        </div>
+      )}
+
+      {qrFullscreen && qrData && (
+        <div
+          onClick={() => setQrFullscreen(false)}
+          onKeyDown={(e) => e.key === "Escape" && setQrFullscreen(false)}
+          tabIndex={0}
+          style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999, cursor: "pointer" }}
+        >
+          <img src={qrData.qrCode} alt="QR Code" style={{ maxWidth: "90vw", maxHeight: "80vh" }} />
+          {qrData.shortCode && <p style={{ fontSize: "2rem", fontWeight: "bold", marginTop: "16px" }}>{qrData.shortCode}</p>}
+          <p style={{ fontSize: "1rem", color: "#666", marginTop: "8px" }}>Click anywhere or press Escape to close</p>
         </div>
       )}
 
