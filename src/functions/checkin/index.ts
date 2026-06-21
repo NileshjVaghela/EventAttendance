@@ -1,14 +1,19 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, UpdateCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, TABLE_NAME, response, generateOtp, hashOtp } from "../shared/utils";
 import { sendOtpEmail } from "../shared/email";
+import { v4 as uuid } from "uuid";
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const path = event.resource;
   const body = event.body ? JSON.parse(event.body) : {};
 
   try {
-    if (path === "/checkin/verify-sequence") {
+    if (path === "/captcha" && event.httpMethod === "GET") {
+      return await generateCaptcha();
+    } else if (path === "/captcha/verify" && event.httpMethod === "POST") {
+      return await verifyCaptcha(body);
+    } else if (path === "/checkin/verify-sequence") {
       return await verifySequence(body);
     } else if (path === "/checkin/verify-otp") {
       return await verifyOtp(body);
@@ -18,6 +23,55 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     console.error(err);
     return response(500, { message: "Internal server error" });
   }
+}
+
+async function generateCaptcha() {
+  const a = Math.floor(Math.random() * 10) + 1;
+  const b = Math.floor(Math.random() * 10) + 1;
+  const captchaId = uuid();
+  const now = Date.now();
+
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `CAPTCHA#${captchaId}`,
+        SK: "#CHALLENGE",
+        answer: a + b,
+        createdAt: now,
+        expiresAt: Math.floor((now + 300000) / 1000), // 5 min TTL
+      },
+    })
+  );
+
+  return response(200, { captchaId, question: `${a} + ${b}` });
+}
+
+async function verifyCaptcha(body: { captchaId: string; answer: number }) {
+  const { captchaId, answer } = body;
+  if (!captchaId || answer === undefined) {
+    return response(400, { message: "captchaId and answer required" });
+  }
+
+  const key = { PK: `CAPTCHA#${captchaId}`, SK: "#CHALLENGE" };
+  const stored = await ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: key }));
+
+  if (!stored.Item) {
+    return response(400, { message: "Captcha expired or invalid" });
+  }
+
+  // Delete after use (one-time)
+  await ddb.send(new DeleteCommand({ TableName: TABLE_NAME, Key: key }));
+
+  if (Date.now() > stored.Item.expiresAt * 1000) {
+    return response(400, { message: "Captcha expired" });
+  }
+
+  if (Number(answer) !== stored.Item.answer) {
+    return response(401, { message: "Incorrect captcha answer" });
+  }
+
+  return response(200, { verified: true });
 }
 
 async function verifySequence(body: { eventId: string; sequenceNumber: string }) {

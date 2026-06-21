@@ -178,6 +178,10 @@ export class EventAttendanceStack extends cdk.Stack {
     });
 
     // Public endpoints (rate-limited, no auth)
+    const captcha = api.root.addResource("captcha");
+    captcha.addMethod("GET", new apigateway.LambdaIntegration(checkinFn));
+    captcha.addResource("verify").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));
+
     const checkin = api.root.addResource("checkin");
     checkin.addResource("verify-sequence").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));
     checkin.addResource("verify-otp").addMethod("POST", new apigateway.LambdaIntegration(checkinFn));

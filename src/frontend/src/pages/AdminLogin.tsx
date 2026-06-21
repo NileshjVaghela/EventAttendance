@@ -1,35 +1,48 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../utils/api";
 
 export function AdminLogin() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [captcha, setCaptcha] = useState({ a: 0, b: 0 });
+  const [captchaId, setCaptchaId] = useState("");
+  const [captchaQuestion, setCaptchaQuestion] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { generateCaptcha(); }, []);
+  useEffect(() => { loadCaptcha(); }, []);
 
-  function generateCaptcha() {
-    setCaptcha({ a: Math.floor(Math.random() * 10) + 1, b: Math.floor(Math.random() * 10) + 1 });
-    setCaptchaAnswer("");
+  async function loadCaptcha() {
+    try {
+      const data = await api("/captcha");
+      setCaptchaId(data.captchaId);
+      setCaptchaQuestion(data.question);
+      setCaptchaAnswer("");
+    } catch {
+      // Fallback: generate client-side if API fails
+      const a = Math.floor(Math.random() * 10) + 1;
+      const b = Math.floor(Math.random() * 10) + 1;
+      setCaptchaId("");
+      setCaptchaQuestion(`${a} + ${b}`);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-
-    // Validate captcha
-    if (parseInt(captchaAnswer) !== captcha.a + captcha.b) {
-      setError("Incorrect captcha answer");
-      generateCaptcha();
-      return;
-    }
-
     setLoading(true);
+
     try {
+      // Server-side captcha validation
+      if (captchaId) {
+        await api("/captcha/verify", {
+          method: "POST",
+          body: JSON.stringify({ captchaId, answer: parseInt(captchaAnswer) }),
+        });
+      }
+
       // Cognito authentication
       const { CognitoUserPool, CognitoUser, AuthenticationDetails } = await import("amazon-cognito-identity-js");
       const poolData = {
@@ -54,7 +67,7 @@ export function AdminLogin() {
       navigate("/admin/dashboard");
     } catch (err: any) {
       setError(err.message || "Login failed");
-      generateCaptcha();
+      loadCaptcha();
     } finally {
       setLoading(false);
     }
@@ -82,7 +95,7 @@ export function AdminLogin() {
             required
           />
           <div className="captcha">
-            <span className="captcha-question">{captcha.a} + {captcha.b} = ?</span>
+            <span className="captcha-question">{captchaQuestion} = ?</span>
             <input
               type="text"
               inputMode="numeric"
