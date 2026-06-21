@@ -190,4 +190,4 @@ TABLE_NAME, ASSETS_BUCKET, USER_POOL_ID, USER_POOL_CLIENT_ID, SES_FROM_EMAIL, FR
 
 ## License
 
-Private — All rights reserved.
+Apache 2 License.
