@@ -15,9 +15,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const queryParams = event.queryStringParameters || {};
   const body = event.body ? JSON.parse(event.body) : {};
 
-  // Extract user role from Cognito claims
+  // Extract user role and email from Cognito claims
   const claims = event.requestContext.authorizer?.claims || {};
   const userRole = claims["custom:role"] || "admin";
+  const userEmail = claims["email"] || "";
 
   try {
     // Events CRUD
@@ -26,9 +27,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await createEvent(body);
     }
     if (resource === "/admin/events" && method === "GET") {
-      return await listEvents();
+      return await listEvents(userRole, userEmail);
     }
     if (resource === "/admin/events/{eventId}" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await getEvent(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}" && method === "PUT") {
@@ -42,6 +44,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // Attendees
     if (resource === "/admin/events/{eventId}/attendees" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await listAttendees(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/attendees/upload" && method === "POST") {
@@ -49,6 +52,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await uploadAttendees(pathParams.eventId!, body);
     }
     if (resource === "/admin/events/{eventId}/attendees/search" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await searchAttendees(pathParams.eventId!, queryParams);
     }
 
@@ -58,6 +62,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return await createSession(pathParams.eventId!, body);
     }
     if (resource === "/admin/events/{eventId}/sessions" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await listSessions(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/sessions/{sessionId}" && method === "PUT") {
@@ -71,24 +76,44 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // QR codes
     if (resource === "/admin/events/{eventId}/qr" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await generateEventQr(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/sessions/{sessionId}/qr" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await generateSessionQr(pathParams.eventId!, pathParams.sessionId!);
     }
 
     // Reports
     if (resource === "/admin/events/{eventId}/reports/checkin" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await checkinReport(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/reports/sessions" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await sessionReport(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/reports/rewards" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await rewardsReport(pathParams.eventId!);
     }
     if (resource === "/admin/events/{eventId}/reports/export" && method === "GET") {
+      await assertEventAccess(userRole, userEmail, pathParams.eventId!);
       return await exportReport(pathParams.eventId!, queryParams);
+    }
+
+    // Staff assignment (admin only)
+    if (resource === "/admin/staff/assign" && method === "POST") {
+      assertRole(userRole, "admin");
+      return await assignStaff(body);
+    }
+    if (resource === "/admin/staff/unassign" && method === "POST") {
+      assertRole(userRole, "admin");
+      return await unassignStaff(body);
+    }
+    if (resource === "/admin/staff/assignments" && method === "GET") {
+      assertRole(userRole, "admin");
+      return await listStaffAssignments(queryParams);
     }
 
     return response(404, { message: "Not found" });
@@ -105,6 +130,75 @@ function assertRole(current: string, required: string) {
   if (required === "admin" && current !== "admin") {
     throw new Error("FORBIDDEN");
   }
+}
+
+async function assertEventAccess(role: string, email: string, eventId: string) {
+  if (role === "admin") return; // admins have full access
+  // Desk staff: check assignment
+  const result = await ddb.send(
+    new GetCommand({ TableName: TABLE_NAME, Key: { PK: `STAFF#${email}`, SK: `EVENT#${eventId}` } })
+  );
+  if (!result.Item) throw new Error("FORBIDDEN");
+}
+
+async function getAssignedEventIds(email: string): Promise<string[]> {
+  const result = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+      ExpressionAttributeValues: { ":pk": `STAFF#${email}`, ":prefix": "EVENT#" },
+    })
+  );
+  return (result.Items || []).map((item: any) => item.eventId);
+}
+
+// --- Staff Assignment ---
+
+async function assignStaff(body: { email: string; eventId: string }) {
+  const { email, eventId } = body;
+  if (!email || !eventId) return response(400, { message: "email and eventId required" });
+
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: { PK: `STAFF#${email}`, SK: `EVENT#${eventId}`, email, eventId, assignedAt: Date.now() },
+    })
+  );
+  return response(200, { message: `${email} assigned to event ${eventId}` });
+}
+
+async function unassignStaff(body: { email: string; eventId: string }) {
+  const { email, eventId } = body;
+  if (!email || !eventId) return response(400, { message: "email and eventId required" });
+
+  await ddb.send(
+    new DeleteCommand({ TableName: TABLE_NAME, Key: { PK: `STAFF#${email}`, SK: `EVENT#${eventId}` } })
+  );
+  return response(200, { message: `${email} unassigned from event ${eventId}` });
+}
+
+async function listStaffAssignments(query: any) {
+  const email = query.email;
+  const eventId = query.eventId;
+
+  if (email) {
+    // List events assigned to a staff member
+    const ids = await getAssignedEventIds(email);
+    return response(200, { email, eventIds: ids });
+  }
+  if (eventId) {
+    // List staff assigned to an event (scan STAFF# entries for this event)
+    const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+    const result = await ddb.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: "begins_with(PK, :prefix) AND SK = :sk",
+        ExpressionAttributeValues: { ":prefix": "STAFF#", ":sk": `EVENT#${eventId}` },
+      })
+    );
+    return response(200, { eventId, staff: (result.Items || []).map((i: any) => i.email) });
+  }
+  return response(400, { message: "email or eventId query parameter required" });
 }
 
 // --- Events ---
@@ -130,7 +224,7 @@ async function createEvent(body: any) {
   return response(201, item);
 }
 
-async function listEvents() {
+async function listEvents(role: string, email: string) {
   const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
   const scanResult = await ddb.send(
     new ScanCommand({
@@ -139,7 +233,15 @@ async function listEvents() {
       ExpressionAttributeValues: { ":meta": "#METADATA", ":prefix": "EVENT#" },
     })
   );
-  return response(200, { events: scanResult.Items || [] });
+  let events = scanResult.Items || [];
+
+  // Desk staff: filter to assigned events only
+  if (role === "deskstaff") {
+    const assignedIds = await getAssignedEventIds(email);
+    events = events.filter((e: any) => assignedIds.includes(e.eventId));
+  }
+
+  return response(200, { events });
 }
 
 async function getEvent(eventId: string) {

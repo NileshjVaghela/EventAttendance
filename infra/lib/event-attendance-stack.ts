@@ -225,6 +225,12 @@ export class EventAttendanceStack extends cdk.Stack {
     reports.addResource("rewards").addMethod("GET", adminIntegration, authOpts);
     reports.addResource("export").addMethod("GET", adminIntegration, authOpts);
 
+    // Staff assignment endpoints (admin only)
+    const staff = admin.addResource("staff");
+    staff.addResource("assign").addMethod("POST", adminIntegration, authOpts);
+    staff.addResource("unassign").addMethod("POST", adminIntegration, authOpts);
+    staff.addResource("assignments").addMethod("GET", adminIntegration, authOpts);
+
     // Outputs
     new cdk.CfnOutput(this, "ApiUrl", { value: api.url });
     new cdk.CfnOutput(this, "FrontendUrl", { value: `https://${distribution.distributionDomainName}` });
