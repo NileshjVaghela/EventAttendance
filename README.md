@@ -17,9 +17,13 @@ A lightweight, serverless event attendance system built on AWS. Attendees scan v
 - QR-based self-service check-in with email OTP verification
 - Breakout session attendance tracking (time-window enforced)
 - Admin panel: event/attendee/session CRUD, QR generation, reports
-- Desk staff read-only access
-- Reports with per-column search, date filter, pagination
-- Auto-refreshing attendee status (5s interval)
+- **Server-side captcha** on admin login (math challenge stored in DynamoDB)
+- **Optional email MFA** for admin accounts (enable/disable per user)
+- **Desk staff role enforcement** — read-only access restricted to assigned events
+- **User management UI** — create/delete admin & desk staff, assign events
+- **Fullscreen QR display** — click QR to go fullscreen, Escape to exit
+- **Short URL codes** — 9-char alphanumeric fallback if QR scanning fails
+- Reports with CSV export
 - Rate-limited OTP (max 5 total, max 3 per 10 min)
 - Event activation control (check-in blocked until event is active)
 
@@ -31,14 +35,20 @@ A lightweight, serverless event attendance system built on AWS. Attendees scan v
 │   └── lib/event-attendance-stack.ts
 ├── src/
 │   ├── functions/          # Lambda functions
-│   │   ├── admin/index.ts      # Admin CRUD, QR, reports
-│   │   ├── checkin/index.ts    # Public: sequence → OTP → verify
+│   │   ├── admin/index.ts      # Admin CRUD, QR, reports, user mgmt, MFA
+│   │   ├── checkin/index.ts    # Public: captcha, short URLs, sequence → OTP → verify
 │   │   ├── session/index.ts    # Public: session attendance
 │   │   └── shared/             # DynamoDB client, OTP utils, email
 │   └── frontend/           # React SPA
 │       └── src/
-│           ├── pages/          # CheckinPage, SessionPage, AdminLogin, AdminDashboard
-│           ├── utils/api.ts    # API client with auth
+│           ├── pages/
+│           │   ├── AdminDashboard.tsx   # Event management, QR display
+│           │   ├── AdminLogin.tsx       # Login with captcha + MFA
+│           │   ├── CheckinPage.tsx      # Attendee check-in flow
+│           │   ├── SessionPage.tsx      # Session attendance
+│           │   ├── UsersPage.tsx        # User & staff management
+│           │   └── ShortRedirect.tsx    # Short URL resolver
+│           ├── utils/api.ts
 │           └── styles.css
 └── docs/                   # User manuals & requirements
 ```
@@ -47,7 +57,7 @@ A lightweight, serverless event attendance system built on AWS. Attendees scan v
 
 - AWS Account with CDK bootstrapped
 - Node.js 20+
-- Docker (for builds)
+- Docker (for builds — all build/test/deploy runs in Docker containers)
 - AWS CLI configured
 
 ## Deployment
@@ -69,7 +79,7 @@ Verify sender and recipient emails in SES (required in sandbox mode):
 aws ses verify-email-identity --email-address your-sender@domain.com
 ```
 
-### 3. Create Admin User
+### 3. Create Initial Admin User
 
 ```bash
 aws cognito-idp admin-create-user \
@@ -84,26 +94,24 @@ aws cognito-idp admin-set-user-password \
   --permanent
 ```
 
-### 4. Build & Deploy Functions
+After this, additional users can be managed via the Admin UI → Users page.
+
+### 4. Build & Deploy Functions (via Docker)
 
 ```bash
-cd src/functions
-npm install
-npx tsc
-cp package.json dist/
-cd dist && npm install --omit=dev
+docker run --rm -v $(pwd):/app -w /app/src/functions node:20-alpine sh -c "npm install && npm run build"
 ```
 
 Then re-run `cdk deploy` to update Lambda code.
 
-### 5. Build & Deploy Frontend
+### 5. Build & Deploy Frontend (via Docker)
 
 ```bash
 cd src/frontend
 cp .env.example .env  # Fill in your values
-npm install
-npx vite build
-aws s3 sync dist/ s3://<frontend-bucket>/ --delete
+
+docker run --rm -v $(pwd):/app -w /app/src/frontend node:20-alpine sh -c "npm install && npm run build"
+aws s3 sync src/frontend/dist/ s3://<frontend-bucket>/ --delete
 aws cloudfront create-invalidation --distribution-id <ID> --paths "/*"
 ```
 
@@ -121,13 +129,57 @@ VITE_USER_POOL_CLIENT_ID=xxxxxxxxxx
 TABLE_NAME, ASSETS_BUCKET, USER_POOL_ID, USER_POOL_CLIENT_ID, SES_FROM_EMAIL, FRONTEND_URL
 ```
 
+## API Endpoints
+
+### Public (no auth)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /captcha | Generate math captcha challenge |
+| POST | /captcha/verify | Validate captcha answer |
+| GET | /s/{code} | Resolve short URL code |
+| POST | /checkin/verify-sequence | Validate sequence, send OTP |
+| POST | /checkin/verify-otp | Verify OTP, return attendee info |
+| POST | /session/attend | Record session attendance |
+
+### Admin (Cognito-protected)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST/GET | /admin/events | Create/list events |
+| GET/PUT/DELETE | /admin/events/{id} | Event CRUD |
+| GET/POST | /admin/events/{id}/attendees | List/upload attendees |
+| GET | /admin/events/{id}/attendees/search | Search by name/seq/company |
+| POST/GET | /admin/events/{id}/sessions | Create/list sessions |
+| GET | /admin/events/{id}/qr | Generate check-in QR + short URL |
+| GET | /admin/events/{id}/sessions/{sid}/qr | Generate session QR + short URL |
+| GET | /admin/events/{id}/reports/* | Check-in, session, rewards, export |
+| POST | /admin/staff/assign | Assign desk staff to event |
+| POST | /admin/staff/unassign | Remove assignment |
+| GET | /admin/staff/assignments | List assignments |
+| POST | /admin/staff/users | User management (create/list/delete/enable-mfa/disable-mfa) |
+| POST | /admin/staff/mfa | MFA operations (check/send/verify) |
+
 ## User Roles
 
 | Role | Access |
 |------|--------|
-| Admin | Full CRUD, reports, user management |
-| Staff | Read-only: view attendees, search, reports |
+| Admin | Full CRUD, reports, user management, MFA control |
+| Staff/Deskstaff | Read-only on assigned events: attendees, search, reports |
 | Attendee | Public: check-in via OTP, session attendance |
+
+## DynamoDB Schema (Single Table)
+
+| Entity | PK | SK |
+|--------|----|----|
+| Event | `EVENT#<eventId>` | `#METADATA` |
+| Attendee | `EVENT#<eventId>` | `ATTENDEE#<seq>` |
+| Session | `EVENT#<eventId>` | `SESSION#<sessionId>` |
+| Attendance | `EVENT#<eventId>#ATT#<seq>` | `SESSION#<sessionId>` |
+| OTP | `OTP#<eventId>#<seq>` | `#LATEST` |
+| Captcha | `CAPTCHA#<id>` | `#CHALLENGE` |
+| Staff Assignment | `STAFF#<email>` | `EVENT#<eventId>` |
+| User MFA Config | `USERMFA#<email>` | `#CONFIG` |
+| MFA OTP | `MFA_OTP#<email>` | `#LATEST` |
+| Short URL | `SHORT#<code>` | `#REDIRECT` |
 
 ## Documentation
 
