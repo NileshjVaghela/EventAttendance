@@ -23,6 +23,7 @@ export function UsersPage() {
   const [createdInfo, setCreatedInfo] = useState<{ email: string; tempPassword: string } | null>(null);
   const [assignModal, setAssignModal] = useState<string | null>(null); // email of user being assigned
   const [assignedEvents, setAssignedEvents] = useState<string[]>([]);
+  const [mfaStatus, setMfaStatus] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -38,6 +39,7 @@ export function UsersPage() {
       ]);
       setUsers(usersRes.users);
       setEvents(eventsRes.events);
+      loadMfaStatuses(usersRes.users.map((u: User) => u.email));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -103,6 +105,30 @@ export function UsersPage() {
     }
   }
 
+  async function toggleMfa(email: string) {
+    const current = mfaStatus[email] || false;
+    try {
+      await api("/admin/staff/users", {
+        method: "POST",
+        body: JSON.stringify({ action: current ? "disable-mfa" : "enable-mfa", email }),
+      });
+      setMfaStatus({ ...mfaStatus, [email]: !current });
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function loadMfaStatuses(userEmails: string[]) {
+    const statuses: Record<string, boolean> = {};
+    for (const email of userEmails) {
+      try {
+        const res = await api("/admin/staff/mfa", { method: "POST", body: JSON.stringify({ action: "check", email }) });
+        statuses[email] = res.mfaRequired;
+      } catch { statuses[email] = false; }
+    }
+    setMfaStatus(statuses);
+  }
+
   if (loading) return <p>Loading users...</p>;
 
   return (
@@ -152,6 +178,7 @@ export function UsersPage() {
           <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
             <th style={{ padding: "8px" }}>Email</th>
             <th style={{ padding: "8px" }}>Role</th>
+            <th style={{ padding: "8px" }}>MFA</th>
             <th style={{ padding: "8px" }}>Status</th>
             <th style={{ padding: "8px" }}>Actions</th>
           </tr>
@@ -164,6 +191,11 @@ export function UsersPage() {
                 <span style={{ background: u.role === "admin" ? "#dbeafe" : "#fef3c7", padding: "2px 8px", borderRadius: "4px", fontSize: "0.85rem" }}>
                   {u.role}
                 </span>
+              </td>
+              <td style={{ padding: "8px" }}>
+                <button onClick={() => toggleMfa(u.email)} style={{ width: "auto", padding: "2px 10px", fontSize: "0.8rem", background: mfaStatus[u.email] ? "#059669" : "#94a3b8", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  {mfaStatus[u.email] ? "ON" : "OFF"}
+                </button>
               </td>
               <td style={{ padding: "8px", fontSize: "0.85rem" }}>{u.status}</td>
               <td style={{ padding: "8px" }}>

@@ -11,6 +11,9 @@ export function AdminLogin() {
   const [captchaQuestion, setCaptchaQuestion] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // MFA state
+  const [mfaStep, setMfaStep] = useState(false);
+  const [mfaOtp, setMfaOtp] = useState("");
 
   useEffect(() => { loadCaptcha(); }, []);
 
@@ -21,7 +24,6 @@ export function AdminLogin() {
       setCaptchaQuestion(data.question);
       setCaptchaAnswer("");
     } catch {
-      // Fallback: generate client-side if API fails
       const a = Math.floor(Math.random() * 10) + 1;
       const b = Math.floor(Math.random() * 10) + 1;
       setCaptchaId("");
@@ -64,13 +66,72 @@ export function AdminLogin() {
         });
       });
 
-      navigate("/admin/dashboard");
+      // Check if MFA is required
+      const mfaCheck = await api("/admin/staff/mfa", {
+        method: "POST",
+        body: JSON.stringify({ action: "check", email }),
+      });
+
+      if (mfaCheck.mfaRequired) {
+        // Send MFA OTP
+        await api("/admin/staff/mfa", {
+          method: "POST",
+          body: JSON.stringify({ action: "send", email }),
+        });
+        setMfaStep(true);
+      } else {
+        navigate("/admin/dashboard");
+      }
     } catch (err: any) {
       setError(err.message || "Login failed");
       loadCaptcha();
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleMfaVerify(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await api("/admin/staff/mfa", {
+        method: "POST",
+        body: JSON.stringify({ action: "verify", email, otp: mfaOtp }),
+      });
+      navigate("/admin/dashboard");
+    } catch (err: any) {
+      setError(err.message || "MFA verification failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (mfaStep) {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1>MFA Verification</h1>
+          <p className="subtitle">Enter the code sent to your email</p>
+          {error && <div className="error">{error}</div>}
+          <form onSubmit={handleMfaVerify}>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="6-digit code"
+              value={mfaOtp}
+              onChange={(e) => setMfaOtp(e.target.value)}
+              maxLength={6}
+              required
+              autoFocus
+            />
+            <button type="submit" disabled={loading}>
+              {loading ? "Verifying..." : "Verify"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   }
 
   return (

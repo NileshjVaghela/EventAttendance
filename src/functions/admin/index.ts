@@ -123,7 +123,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (action === "create") return await createUser(body);
       if (action === "list") return await listUsers();
       if (action === "delete") return await deleteUser(body.email);
-      return response(400, { message: "action must be create, list, or delete" });
+      if (action === "enable-mfa") return await setMfa(body.email || userEmail, true);
+      if (action === "disable-mfa") return await setMfa(body.email || userEmail, false);
+      return response(400, { message: "Invalid action" });
+    }
+
+    // MFA verification (public-ish — called after Cognito auth but before full session)
+    if (resource === "/admin/staff/mfa" && method === "POST") {
+      const action = body.action;
+      if (action === "check") return await checkMfaRequired(body.email);
+      if (action === "send") return await sendMfaOtp(body.email);
+      if (action === "verify") return await verifyMfaOtp(body.email, body.otp);
+      return response(400, { message: "Invalid action" });
     }
 
     return response(404, { message: "Not found" });
@@ -271,6 +282,78 @@ async function deleteUser(email: string) {
   }
 
   return response(200, { message: `User ${email} deleted` });
+}
+
+// --- MFA ---
+
+async function setMfa(email: string, enabled: boolean) {
+  if (!email) return response(400, { message: "email required" });
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: { PK: `USERMFA#${email}`, SK: "#CONFIG", email, mfaEnabled: enabled, updatedAt: Date.now() },
+    })
+  );
+  return response(200, { email, mfaEnabled: enabled });
+}
+
+async function checkMfaRequired(email: string) {
+  if (!email) return response(400, { message: "email required" });
+  const result = await ddb.send(
+    new GetCommand({ TableName: TABLE_NAME, Key: { PK: `USERMFA#${email}`, SK: "#CONFIG" } })
+  );
+  return response(200, { mfaRequired: result.Item?.mfaEnabled === true });
+}
+
+async function sendMfaOtp(email: string) {
+  if (!email) return response(400, { message: "email required" });
+  const { generateOtp, hashOtp } = await import("../shared/utils");
+  const { sendOtpEmail } = await import("../shared/email");
+
+  const otp = generateOtp();
+  const now = Date.now();
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `MFA_OTP#${email}`,
+        SK: "#LATEST",
+        otpHash: hashOtp(otp),
+        createdAt: now,
+        expiresAt: Math.floor((now + 600000) / 1000),
+        attempts: 0,
+      },
+    })
+  );
+  await sendOtpEmail(email, otp, "Admin MFA Login");
+  return response(200, { message: "MFA code sent to email" });
+}
+
+async function verifyMfaOtp(email: string, otp: string) {
+  if (!email || !otp) return response(400, { message: "email and otp required" });
+  const { hashOtp } = await import("../shared/utils");
+
+  const key = { PK: `MFA_OTP#${email}`, SK: "#LATEST" };
+  const stored = await ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: key }));
+
+  if (!stored.Item) return response(400, { message: "No MFA code found. Request a new one." });
+  if (Date.now() > stored.Item.expiresAt * 1000) return response(400, { message: "MFA code expired" });
+  if (stored.Item.attempts >= 3) return response(429, { message: "Too many attempts. Request a new code." });
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: key,
+      UpdateExpression: "SET attempts = attempts + :one",
+      ExpressionAttributeValues: { ":one": 1 },
+    })
+  );
+
+  if (hashOtp(otp) !== stored.Item.otpHash) return response(401, { message: "Invalid MFA code" });
+
+  // Delete used OTP
+  await ddb.send(new DeleteCommand({ TableName: TABLE_NAME, Key: key }));
+  return response(200, { verified: true });
 }
 
 // --- Events ---
