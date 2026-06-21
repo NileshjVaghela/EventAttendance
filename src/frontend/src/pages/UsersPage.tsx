@@ -167,7 +167,7 @@ export function UsersPage() {
               </td>
               <td style={{ padding: "8px", fontSize: "0.85rem" }}>{u.status}</td>
               <td style={{ padding: "8px" }}>
-                {u.role === "deskstaff" && (
+                {(u.role === "deskstaff" || u.role === "staff") && (
                   <button onClick={() => openAssignModal(u.email)} style={{ width: "auto", padding: "4px 10px", fontSize: "0.8rem", marginRight: "8px", background: "#059669" }}>
                     Assign Events
                   </button>

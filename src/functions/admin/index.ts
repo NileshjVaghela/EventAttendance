@@ -218,7 +218,7 @@ const USER_POOL_ID = process.env.USER_POOL_ID!;
 async function createUser(body: { email: string; role: string; tempPassword?: string }) {
   const { email, role } = body;
   if (!email || !role) return response(400, { message: "email and role required" });
-  if (!["admin", "deskstaff"].includes(role)) return response(400, { message: "role must be admin or deskstaff" });
+  if (!["admin", "deskstaff", "staff"].includes(role)) return response(400, { message: "role must be admin, deskstaff, or staff" });
 
   const { CognitoIdentityProviderClient, AdminCreateUserCommand, AdminUpdateUserAttributesCommand } = await import("@aws-sdk/client-cognito-identity-provider");
   const cognito = new CognitoIdentityProviderClient({});
@@ -308,7 +308,7 @@ async function listEvents(role: string, email: string) {
   let events = scanResult.Items || [];
 
   // Desk staff: filter to assigned events only
-  if (role === "deskstaff") {
+  if (role === "deskstaff" || role === "staff") {
     const assignedIds = await getAssignedEventIds(email);
     events = events.filter((e: any) => assignedIds.includes(e.eventId));
   }
